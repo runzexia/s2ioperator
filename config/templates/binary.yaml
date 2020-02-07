@@ -5,6 +5,10 @@ metadata:
     controller-tools.k8s.io: "1.0"
     builder-type.kubesphere.io/b2i: "b2i"
     binary-type.kubesphere.io: "binary"
+  annotations:
+    descriptionEN: "This is a builder template for binary build"
+    descriptionCN: "二进制文件的构建器模版"
+    devops.kubesphere.io/s2i-template-url: https://github.com/kubesphere/s2i-binary-container
   name: binary
 spec:
   containerInfo:
@@ -18,5 +22,5 @@ spec:
   codeFramework: binary
   defaultBaseImage: kubespheredev/s2i-binary:latest
   version: 0.0.1
-  description: "This is a B2i builder template for binary build"
+  description: "This is a builder template for binary build"
   iconPath: assets/binary.png

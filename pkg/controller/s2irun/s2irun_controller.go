@@ -53,6 +53,7 @@ const (
 	RegularServiceAccount    = "s2irun"
 	RegularRoleName          = "s2i-regular-role"
 	RegularRoleBinding       = "s2i-regular-rolebinding"
+	DefaultRevisionId        = "master"
 )
 
 /**
@@ -127,6 +128,7 @@ type ReconcileS2iRun struct {
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
 func (r *ReconcileS2iRun) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	// Fetch the S2iRun instance
 	log.Info("Reconciler of s2irun called", "Name", request.Name)
@@ -329,15 +331,33 @@ func (r *ReconcileS2iRun) Reconcile(request reconcile.Request) (reconcile.Result
 	}
 	foundPod := pods.Items[0]
 
-	buildSource := foundPod.Annotations[AnnotationBuildSourceKey]
 	s2iBuildSource := &devopsv1alpha1.S2iBuildSource{}
-	err = json.Unmarshal([]byte(buildSource), s2iBuildSource)
+	if buildSource := foundPod.Annotations[AnnotationBuildSourceKey]; buildSource != "" {
+		err = json.Unmarshal([]byte(buildSource), s2iBuildSource)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	}
 	instance.Status.S2iBuildSource = s2iBuildSource
-	if instance.Status.RunState == devopsv1alpha1.Successful {
-		buildResult := foundPod.Annotations[AnnotationBuildResultKey]
-		s2iBuildResult := &devopsv1alpha1.S2iBuildResult{}
+
+	s2iBuildResult := &devopsv1alpha1.S2iBuildResult{}
+	if buildResult := foundPod.Annotations[AnnotationBuildResultKey]; buildResult != "" {
 		err = json.Unmarshal([]byte(buildResult), s2iBuildResult)
-		instance.Status.S2iBuildResult = s2iBuildResult
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+	instance.Status.S2iBuildResult = s2iBuildResult
+
+	//set default build source info
+	instance.Status.S2iBuildSource.BuilderImage = builder.Spec.Config.BuilderImage
+	instance.Status.S2iBuildSource.SourceUrl = builder.Spec.Config.SourceURL
+	instance.Status.S2iBuildSource.Description = builder.Spec.Config.Description
+	instance.Status.S2iBuildResult.ImageName = builder.Spec.Config.ImageName
+	if builder.Spec.Config.RevisionId == "" {
+		instance.Status.S2iBuildSource.RevisionId = DefaultRevisionId
+	} else {
+		instance.Status.S2iBuildSource.RevisionId = builder.Spec.Config.RevisionId
 	}
 
 	// if job finished, scale workloads
@@ -435,7 +455,7 @@ func (r *ReconcileS2iRun) ScaleWorkLoads(instance *devopsv1alpha1.S2iRun, builde
 					deploy := &v1.Deployment{}
 					err := r.Get(context.TODO(), types.NamespacedName{Namespace: instance.Namespace, Name: scale.Name}, deploy)
 					if err != nil && k8serror.IsNotFound(err) {
-						errs = append(errs, err)
+						log.Info("Workload not found", "ns", instance.Namespace, "deploy", deploy.Name)
 						continue
 					} else if err != nil {
 						return err
@@ -501,7 +521,7 @@ func (r *ReconcileS2iRun) ScaleWorkLoads(instance *devopsv1alpha1.S2iRun, builde
 					statefulSet := &v1.StatefulSet{}
 					err := r.Get(context.TODO(), types.NamespacedName{Namespace: instance.Namespace, Name: scale.Name}, statefulSet)
 					if err != nil {
-						errs = append(errs, err)
+						log.Info("Workload not found", "ns", instance.Namespace, "deploy", scale.Name)
 						continue
 					}
 					log.Info("Autoscale StatefulSet", "ns", instance.Namespace, "statefulSet", statefulSet.Name)
